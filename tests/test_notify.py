@@ -132,20 +132,58 @@ class TestNotifyOS(unittest.TestCase):
 
     @patch("platform.system")
     @patch("subprocess.run")
-    def test_mac_osascript(self, mock_run, mock_system):
+    def test_mac_terminal_notifier_success(self, mock_run, mock_system):
         mock_system.return_value = "Darwin"
-        mock_run.return_value = MagicMock(returncode=0)
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # which terminal-notifier succeeds
+            MagicMock(returncode=0),  # terminal-notifier command succeeds
+        ]
 
         res = _send_notification_sync(
             "Hello", 'World "Quotes"', subtitle="Sub", sound=True
         )
         self.assertTrue(res)
-        mock_run.assert_called_once()
-        called_args = mock_run.call_args[0][0]
-        self.assertEqual(called_args[0], "osascript")
-        self.assertEqual(called_args[1], "-e")
-        expected_script = 'display notification "World \\"Quotes\\"" with title "Hello" subtitle "Sub" sound name "Tink"'
-        self.assertEqual(called_args[2], expected_script)
+        self.assertEqual(mock_run.call_count, 2)
+        
+        # Verify first call checked terminal-notifier
+        called_args_first = mock_run.call_args_list[0][0][0]
+        self.assertEqual(called_args_first, ["which", "terminal-notifier"])
+
+        # Verify second call used terminal-notifier
+        called_args_second = mock_run.call_args_list[1][0][0]
+        self.assertEqual(called_args_second[0], "terminal-notifier")
+        self.assertIn("-title", called_args_second)
+        self.assertIn("Hello", called_args_second)
+        self.assertIn("-message", called_args_second)
+        self.assertIn('World "Quotes"', called_args_second)
+        self.assertIn("-subtitle", called_args_second)
+        self.assertIn("Sub", called_args_second)
+        self.assertIn("-sound", called_args_second)
+        self.assertIn("default", called_args_second)
+
+    @patch("platform.system")
+    @patch("subprocess.run")
+    def test_mac_osascript_fallback(self, mock_run, mock_system):
+        mock_system.return_value = "Darwin"
+        mock_run.side_effect = [
+            Exception("not found"),   # which terminal-notifier fails
+            MagicMock(returncode=0),  # osascript succeeds
+        ]
+
+        res = _send_notification_sync(
+            "Hello", 'World "Quotes"', subtitle="Sub", sound=True
+        )
+        self.assertTrue(res)
+        self.assertEqual(mock_run.call_count, 2)
+        
+        called_args_first = mock_run.call_args_list[0][0][0]
+        self.assertEqual(called_args_first, ["which", "terminal-notifier"])
+
+        called_args_second = mock_run.call_args_list[1][0][0]
+        self.assertEqual(called_args_second[0], "osascript")
+        self.assertEqual(called_args_second[1], "-e")
+        expected_script = 'tell application "Finder" to display notification "World \\"Quotes\\"" with title "Hello" subtitle "Sub" sound name "Tink"'
+        self.assertEqual(called_args_second[2], expected_script)
 
     @patch("platform.system")
     @patch("subprocess.run")

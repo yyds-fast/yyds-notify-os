@@ -213,12 +213,37 @@ def _send_notification_sync(
     # MACOS IMPLEMENTATION
     # ----------------------------------------------------
     elif system == "Darwin":
-        # AppleScript execution
+        # 1. Try terminal-notifier first if available (more reliable on modern macOS)
+        has_terminal_notifier = False
+        try:
+            subprocess.run(["which", "terminal-notifier"], capture_output=True, check=True)
+            has_terminal_notifier = True
+        except Exception:
+            pass
+
+        if has_terminal_notifier:
+            cmd = ["terminal-notifier", "-title", title, "-message", message]
+            if subtitle:
+                cmd.extend(["-subtitle", subtitle])
+            if sound:
+                sound_name = sound if isinstance(sound, str) else "default"
+                cmd.extend(["-sound", sound_name])
+            
+            try:
+                res = subprocess.run(cmd, capture_output=True)
+                if res.returncode == 0:
+                    return True
+                else:
+                    logger.debug(f"terminal-notifier failed with return code {res.returncode}. Stderr: {res.stderr.decode('utf-8', errors='ignore')}")
+            except Exception as e:
+                logger.debug(f"terminal-notifier execution failed: {e}")
+
+        # 2. Fallback to AppleScript execution
         esc_title = _escape_applescript(title)
         esc_msg = _escape_applescript(message)
         esc_sub = _escape_applescript(subtitle) if subtitle else None
         
-        script = f'display notification "{esc_msg}" with title "{esc_title}"'
+        script = f'tell application "Finder" to display notification "{esc_msg}" with title "{esc_title}"'
         if esc_sub:
             script += f' subtitle "{esc_sub}"'
         
@@ -229,6 +254,8 @@ def _send_notification_sync(
         try:
             res = subprocess.run(["osascript", "-e", script], capture_output=True)
             success = (res.returncode == 0)
+            if not success:
+                logger.debug(f"AppleScript notification failed with return code {res.returncode}. Stderr: {res.stderr.decode('utf-8', errors='ignore')}")
         except Exception as e:
             logger.debug(f"AppleScript notification failed: {e}")
             success = False

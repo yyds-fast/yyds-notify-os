@@ -121,7 +121,8 @@ yyds-notify --help
    - If WinRT initialization fails, it falls back to the classic balloon tip (`System.Windows.Forms.NotifyIcon`).
 
 2. **macOS**:
-   - Executes AppleScript (`osascript`) with display notification instructions.
+   - Detects and utilizes `terminal-notifier` if installed (highly recommended for modern macOS notifications with customizable options).
+   - If not available, falls back to AppleScript (`osascript`) routed through the `Finder` application context (`tell application "Finder" to display notification ...`). This allows notifications to be delivered reliably without being silently swallowed by the operating system due to terminal or IDE process permission restrictions.
    - Implements robust escaping for double quotes and backslashes to eliminate script execution failures.
 
 3. **Linux**:

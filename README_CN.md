@@ -123,7 +123,8 @@ yyds-notify --help
    - 针对不支持 WinRT 的 Windows 旧版本环境，最终捕获异常并降级使用经典的 `System.Windows.Forms.NotifyIcon` 右下角通知气泡。
 
 2. **macOS**：
-   - 使用系统的 `osascript` 运行 AppleScript 代码块 `display notification` 发送通知。
+   - 自动检测并优先使用 `terminal-notifier` 工具（若系统已安装，推荐使用 `brew install terminal-notifier`），这提供了最优秀的原生通知体验。
+   - 若未安装，则自动回退到 AppleScript (`osascript`) 并**委托给 `Finder` 应用上下文运行** (`tell application "Finder" to display notification ...`)。这极大地规避了由于终端（Terminal / VS Code 等）本身没有通知权限而导致通知被系统静默拦截丢弃的问题。
    - 内部已做好字符串转义逻辑，杜绝任意字符带来的命令注入风险。
 
 3. **Linux**：

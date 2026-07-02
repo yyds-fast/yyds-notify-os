@@ -16,7 +16,7 @@ A high-performance, lightweight, and easy-to-use cross-platform desktop notifica
 * **支持覆盖/替换机制 (`replace_id`)**：频繁发送时自动覆盖旧通知卡片（如进度条或动态监控），避免 Action Center 中卡片堆叠。
 * **Windows 深度视觉打磨**：升级为微软现代的 `ToastGeneric` 模板，原生支持自定义图标 (`icon`) 和静音/映射系统预设声音 (`sound`)。
 * **路径智能补全**：自动将相对路径的图标转换为绝对路径，规避底层进程执行报错。
-* **优雅兜底 (Robust Fallback)**：当环境没有 GUI（如 SSH 终端、Headless CI 容器）或通知发送失败时，自动退化为控制台标准错误（sys.stderr）输出，确保程序永不崩溃。
+* **优雅兜底 (Robust Fallback)**：当环境没有 GUI（如 SSH 终端、Headless CI 容器）或通知发送失败时，自动退化为控制台标准错误（sys.stderr）输出，并前置 ASCII 蜂鸣器控制符 (`\a`) 触发终端嘀声提示，确保程序永不崩溃的同时给出即时反馈。
 * **包含命令行工具 (CLI Integrated)**：附带快捷可用的 `yyds-notify` / `yyds-notify-os` 命令，且默认显示应用名优化为 `"yyds-notify"`，方便脚本快速集成。
 
 ---
@@ -121,4 +121,4 @@ yyds-notify --help
 3. **Linux**：
    - 优先检测 `DISPLAY` 与 `WAYLAND_DISPLAY` 环境变量。
    - 有图形环境时，第一选择是调用 Linux 标准的 `notify-send`（`libnotify`）。**支持由完整参数到精简参数的多层降级重试机制**（如系统不支持 `-r` 或 `-a` 则自动剥离该标志运行，直至用最基础命令显示通知），若系统没有 `notify-send` 命令，则尝试寻找 `zenity --notification` 唤起通知。
-   - 无图形环境（Headless/SSH）下，自动退化为向终端标准错误流中写入 `[Notification] Title: Message`。
+   - 无图形环境（Headless/SSH）下，自动退化为向终端标准错误流中写入 `\a[Notification] Title: Message`（前置 `\a` 控制符触发终端蜂鸣音提示）。

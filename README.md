@@ -14,7 +14,7 @@ A high-performance, lightweight, and easy-to-use cross-platform desktop notifica
 * **Notification Replacement/Updating (`replace_id`)**: Update an existing notification card in-place (ideal for progress bars or dynamic alerts) without cluttering the Action Center.
 * **Modern Windows Customizations**: Uses Microsoft's modern `ToastGeneric` template to support custom application icons (`icon`) and mapped system sounds (`sound`) or mute configurations.
 * **Path Auto-Resolution**: Automatically converts relative icon paths to absolute paths to prevent subprocess path resolution failures.
-* **Robust Fail-Safe Fallbacks**: Under headless environments (e.g. SSH sessions) or when graphical notifications fail, it gracefully falls back to console stderr output without crashing.
+* **Robust Fail-Safe Fallbacks**: Under headless environments (e.g. SSH sessions) or when graphical notifications fail, it gracefully falls back to console stderr output without crashing, and includes an ASCII bell character (`\a`) to trigger a terminal beep for immediate feedback.
 * **Command Line Interface (CLI)**: Out-of-the-box `yyds-notify` / `yyds-notify-os` commands for shell script integrations.
 
 ---
@@ -119,4 +119,4 @@ yyds-notify --help
 3. **Linux**:
    - Detects `DISPLAY` and `WAYLAND_DISPLAY` environments.
    - If GUI is present, uses `notify-send` with a progressive fallback array (peels off unsupported options like `-r` or `-a` step-by-step if the local `notify-send` version is outdated). Falls back to `zenity --notification` if `notify-send` is completely absent.
-   - If headless (no GUI), automatically prints notification details to standard error (`sys.stderr`) to prevent crashes.
+   - If headless (no GUI), automatically prints notification details to standard error (`sys.stderr`) prepended with an ASCII bell character (`\a`) to trigger a terminal beep.

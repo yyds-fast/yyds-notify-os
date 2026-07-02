@@ -320,7 +320,7 @@ def _send_notification_sync(
     # ----------------------------------------------------
     if not success and fallback_to_print:
         # Fallback print to terminal or stderr
-        fallback_msg = f"[Notification] {title}"
+        fallback_msg = f"\a[Notification] {title}"
         if subtitle:
             fallback_msg += f" ({subtitle})"
         fallback_msg += f": {message}"

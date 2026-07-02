@@ -128,7 +128,7 @@ class TestNotifyOS(unittest.TestCase):
             mock_run.assert_not_called()
             mock_stderr.assert_called_once()
             written_str = mock_stderr.call_args[0][0]
-            self.assertIn("[Notification] Title: Message", written_str)
+            self.assertIn("\a[Notification] Title: Message", written_str)
 
     @patch("platform.system")
     @patch("subprocess.run")

@@ -32,6 +32,14 @@ pip install -e .
 
 ---
 
+## 📂 Examples
+
+You can find runnable usage examples in the [example/](file:///home/wzb/yyds_github/yyds-notify-os/example) directory:
+* [demo.py](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.py): Comprehensive Python API examples demonstrating basic usage, custom settings, and dynamic progress bar notifications using `replace_id`.
+* [demo.sh](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.sh): Shell script demonstrating command line interface (CLI) usage with various parameters.
+
+---
+
 ## 💻 Python API Usage
 
 ```python

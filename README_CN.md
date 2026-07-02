@@ -34,6 +34,14 @@ pip install -e .
 
 ---
 
+## 📂 使用示例 (Examples)
+
+你可以在 [example/](file:///home/wzb/yyds_github/yyds-notify-os/example) 目录中找到可运行的使用示例：
+* [demo.py](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.py)：展示了 API 的核心用法，包括基础通知、自定义设置（声音、紧急度、自定义应用名等）以及使用 `replace_id` 实现进度条动态更新。
+* [demo.sh](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.sh)：展示了如何通过命令行工具（CLI）调用各项参数发送及更新通知。
+
+---
+
 ## 💻 Python API 使用方法 (Usage)
 
 ```python

@@ -27,19 +27,42 @@ def main():
 
     args = parser.parse_args()
 
-    success = notify(
-        title=args.title,
-        message=args.message,
-        subtitle=args.subtitle,
-        icon=args.icon,
-        urgency=args.urgency,
-        timeout=args.timeout,
-        sound=args.sound,
-        app_name=args.app_name,
-        replace_id=args.replace_id,
-        block=args.block,
-        fallback_to_print=True
-    )
+    # Handle async execution properly for CLI tool to avoid daemon thread getting killed immediately
+    if not args.block:
+        import subprocess
+        # Reconstruct arguments without '--async'
+        new_args = [sys.executable, "-m", "yyds_notify_os.cli"]
+        for arg in sys.argv[1:]:
+            if arg not in ("--async",):
+                new_args.append(arg)
+        
+        # Start a detached background process to do the actual notification
+        subprocess.Popen(
+            new_args,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            close_fds=True,
+            creationflags=0x00000008 if sys.platform == "win32" else 0, # DETACHED_PROCESS
+        )
+        sys.exit(0)
+
+    try:
+        success = notify(
+            title=args.title,
+            message=args.message,
+            subtitle=args.subtitle,
+            icon=args.icon,
+            urgency=args.urgency,
+            timeout=args.timeout,
+            sound=args.sound,
+            app_name=args.app_name,
+            replace_id=args.replace_id,
+            block=args.block,
+            fallback_to_print=True
+        )
+    except ValueError as e:
+        sys.stderr.write(f"Error: {e}\n")
+        sys.exit(1)
     
     # Return exit code 0 on success, 1 on failure
     sys.exit(0 if success else 1)

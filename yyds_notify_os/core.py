@@ -7,6 +7,7 @@ import subprocess
 import threading
 import logging
 import base64
+import html
 
 logger = logging.getLogger("yyds_notify_os")
 
@@ -175,7 +176,7 @@ def _send_notification_sync(
                 $notification.BalloonTipText = $message
                 $notification.Visible = $True
                 $notification.ShowBalloonTip(5000)
-                Start-Sleep -Seconds 1
+                Start-Sleep -Seconds 5
                 $notification.Dispose()
                 exit 0
             } catch {
@@ -287,7 +288,13 @@ def _send_notification_sync(
                 if icon_path:
                     cmd_full.extend(["-i", icon_path])
                 if replace_id is not None:
-                    cmd_full.extend(["-r", str(replace_id)])
+                    try:
+                        resolved_id = int(replace_id)
+                    except (ValueError, TypeError):
+                        import hashlib
+                        h = hashlib.md5(str(replace_id).encode("utf-8")).hexdigest()
+                        resolved_id = int(h[:7], 16) + 1
+                    cmd_full.extend(["-r", str(resolved_id)])
                 cmds_to_try.append(cmd_full)
                 
                 # 2. Try without replace_id (-r option is not supported on older versions)
@@ -324,9 +331,12 @@ def _send_notification_sync(
                 try:
                     subprocess.run(["which", "zenity"], capture_output=True, check=True)
                     
-                    zenity_text = f"<b>{title}</b>\n{message}"
+                    escaped_title = html.escape(title)
+                    escaped_msg = html.escape(message)
+                    zenity_text = f"<b>{escaped_title}</b>\n{escaped_msg}"
                     if subtitle:
-                        zenity_text = f"<b>{title}</b>\n<i>{subtitle}</i>\n{message}"
+                        escaped_sub = html.escape(subtitle)
+                        zenity_text = f"<b>{escaped_title}</b>\n<i>{escaped_sub}</i>\n{escaped_msg}"
                     
                     cmd = ["zenity", "--notification", f"--text={zenity_text}"]
                     if icon_path:
@@ -353,10 +363,16 @@ def _send_notification_sync(
         fallback_msg += f": {message}"
         
         try:
-            sys.stderr.write(fallback_msg + "\n")
-            sys.stderr.flush()
+            try:
+                sys.stderr.write(fallback_msg + "\n")
+                sys.stderr.flush()
+            except Exception:
+                try:
+                    print(fallback_msg)
+                except Exception:
+                    pass
         except Exception:
-            print(fallback_msg)
+            pass
             
         logger.info(fallback_msg)
         return False

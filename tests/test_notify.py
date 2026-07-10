@@ -228,6 +228,48 @@ class TestNotifyOS(unittest.TestCase):
         self.assertTrue(mock_thread.call_args[1]["daemon"])
         mock_thread_instance.start.assert_called_once()
 
+    @patch("platform.system")
+    @patch("subprocess.run")
+    def test_linux_zenity_markup_escaping(self, mock_run, mock_system):
+        mock_system.return_value = "Linux"
+        mock_run.side_effect = [
+            Exception("not found"),   # which notify-send
+            MagicMock(returncode=0),  # which zenity
+            MagicMock(returncode=0),  # zenity command
+        ]
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}):
+            res = _send_notification_sync("Title & Co", "1 < 2", subtitle="sub > detail", fallback_to_print=False)
+            self.assertTrue(res)
+
+        self.assertEqual(mock_run.call_count, 3)
+        called_args = mock_run.call_args_list[2][0][0]
+        self.assertIn("zenity", called_args)
+        self.assertIn("--notification", called_args)
+        self.assertIn("--text=<b>Title &amp; Co</b>\n<i>sub &gt; detail</i>\n1 &lt; 2", called_args)
+
+    @patch("platform.system")
+    @patch("subprocess.run")
+    def test_linux_notify_send_string_replace_id(self, mock_run, mock_system):
+        mock_system.return_value = "Linux"
+        mock_run.side_effect = [
+            MagicMock(returncode=0),  # which notify-send
+            MagicMock(returncode=0),  # notify-send with -r
+        ]
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}):
+            res = _send_notification_sync("T", "M", replace_id="my_task_id")
+            self.assertTrue(res)
+
+        self.assertEqual(mock_run.call_count, 2)
+        called_args = mock_run.call_args_list[1][0][0]
+        self.assertIn("-r", called_args)
+        
+        import hashlib
+        h = hashlib.md5(b"my_task_id").hexdigest()
+        expected_id = int(h[:7], 16) + 1
+        self.assertIn(str(expected_id), called_args)
+
 
 if __name__ == "__main__":
     unittest.main()

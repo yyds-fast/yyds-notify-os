@@ -2,10 +2,20 @@
 
 import argparse
 import sys
+import logging
 from yyds_notify_os.core import notify
 from yyds_notify_os.__version__ import __version__, __title__
 
 def main():
+    # Setup logger formatting for CLI
+    logger = logging.getLogger("yyds_notify_os")
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+        logger.setLevel(logging.WARNING)
+
     parser = argparse.ArgumentParser(
         description="A beautiful, cross-platform command line notification tool.",
         prog="yyds-notify"

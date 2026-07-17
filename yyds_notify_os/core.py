@@ -8,16 +8,63 @@ import threading
 import logging
 import base64
 import html
+import atexit
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger("yyds_notify_os")
+logger.addHandler(logging.NullHandler())
 
-# Setup default logger formatting to be simple and clean
-if not logger.handlers:
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-    logger.setLevel(logging.WARNING)
+# Bounded thread pool for async execution
+_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="yyds_notify_os_worker")
+_active_futures = set()
+_futures_lock = threading.Lock()
+
+
+def _add_future(future):
+    with _futures_lock:
+        _active_futures.add(future)
+        future.add_done_callback(lambda f: _active_futures.discard(f))
+
+
+def shutdown(wait: bool = True, timeout: float = 5.0) -> None:
+    """
+    Shuts down the background notification executor.
+
+    Args:
+        wait (bool): If True, wait for pending notifications to complete.
+        timeout (float): Maximum time in seconds to wait for pending notifications.
+                         Only used if wait is True.
+    """
+    _executor.shutdown(wait=False)
+    if wait:
+        with _futures_lock:
+            futures = list(_active_futures)
+        if futures:
+            from concurrent.futures import wait as wait_futures
+            wait_futures(futures, timeout=timeout)
+
+
+def _atexit_cleanup():
+    shutdown(wait=True, timeout=5.0)
+
+
+atexit.register(_atexit_cleanup)
+
+
+def _sanitize_string(text: str, max_len: int) -> str:
+    """
+    Sanitizes string by removing null bytes, cleaning control characters,
+    and truncating to max_len.
+    """
+    if not text:
+        return ""
+    text = str(text).replace("\x00", "")
+    # Keep printable/standard chars, strip raw control chars (except \n, \r, \t)
+    text = "".join(c for c in text if c >= ' ' or c in '\n\r\t')
+    text = text.strip()
+    if len(text) > max_len:
+        text = text[:max_len] + "..."
+    return text
 
 
 # Windows sound events mapping
@@ -92,7 +139,7 @@ def _send_notification_sync(
     if system == "Windows":
         # We run PowerShell using environment variables to transfer strings safely
         # and Base64 EncodedCommand to bypass any complex console escaping problems.
-        app_id = f"{{{os.environ.get('COMPUTERNAME', 'Python-Notify')}}}\\WindowsPowerShell\\v1.0\\powershell.exe"
+        app_id = "{1AC14E77-C8E7-45C6-87F6-C512F4342091}\\WindowsPowerShell\\v1.0\\powershell.exe"
         
         # Map sound to Windows sound events
         sound_src = ""
@@ -203,9 +250,13 @@ def _send_notification_sync(
                 ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded_script],
                 env=env,
                 capture_output=True,
+                timeout=10,
                 creationflags=0x08000000 if hasattr(subprocess, "CREATE_NO_WINDOW") else 0, # CREATE_NO_WINDOW
             )
             success = (res.returncode == 0)
+        except subprocess.TimeoutExpired as e:
+            logger.warning(f"PowerShell notification timed out: {e}")
+            success = False
         except Exception as e:
             logger.debug(f"PowerShell notification failed: {e}")
             success = False
@@ -217,7 +268,7 @@ def _send_notification_sync(
         # 1. Try terminal-notifier first if available (more reliable on modern macOS)
         has_terminal_notifier = False
         try:
-            subprocess.run(["which", "terminal-notifier"], capture_output=True, check=True)
+            subprocess.run(["which", "terminal-notifier"], capture_output=True, check=True, timeout=5)
             has_terminal_notifier = True
         except Exception:
             pass
@@ -231,32 +282,67 @@ def _send_notification_sync(
                 cmd.extend(["-sound", sound_name])
             
             try:
-                res = subprocess.run(cmd, capture_output=True)
+                res = subprocess.run(cmd, capture_output=True, timeout=10)
                 if res.returncode == 0:
                     return True
                 else:
                     logger.debug(f"terminal-notifier failed with return code {res.returncode}. Stderr: {res.stderr.decode('utf-8', errors='ignore')}")
+            except subprocess.TimeoutExpired as e:
+                logger.warning(f"terminal-notifier timed out: {e}")
             except Exception as e:
                 logger.debug(f"terminal-notifier execution failed: {e}")
 
-        # 2. Fallback to AppleScript execution
-        esc_title = _escape_applescript(title)
-        esc_msg = _escape_applescript(message)
-        esc_sub = _escape_applescript(subtitle) if subtitle else None
-        
-        script = f'tell application "Finder" to display notification "{esc_msg}" with title "{esc_title}"'
-        if esc_sub:
-            script += f' subtitle "{esc_sub}"'
-        
-        if sound:
-            sound_name = sound if isinstance(sound, str) else "Tink"
-            script += f' sound name "{sound_name}"'
+        # 2. Fallback to AppleScript execution using environment variables (system attribute)
+        env = os.environ.copy()
+        env["NOTIFY_TITLE"] = title
+        env["NOTIFY_MESSAGE"] = message
+        env["NOTIFY_SUBTITLE"] = subtitle if subtitle else ""
+        env["NOTIFY_SOUND"] = sound if isinstance(sound, str) else ("Tink" if sound else "")
+
+        script = (
+            'set theTitle to system attribute "NOTIFY_TITLE"\n'
+            'set theMsg to system attribute "NOTIFY_MESSAGE"\n'
+            'set theSub to system attribute "NOTIFY_SUBTITLE"\n'
+            'set theSound to system attribute "NOTIFY_SOUND"\n'
+            'try\n'
+            '    if theSub is not "" then\n'
+            '        if theSound is not "" then\n'
+            '            tell application "Finder" to display notification theMsg with title theTitle subtitle theSub sound name theSound\n'
+            '        else\n'
+            '            tell application "Finder" to display notification theMsg with title theTitle subtitle theSub\n'
+            '        end if\n'
+            '    else\n'
+            '        if theSound is not "" then\n'
+            '            tell application "Finder" to display notification theMsg with title theTitle sound name theSound\n'
+            '        else\n'
+            '            tell application "Finder" to display notification theMsg with title theTitle\n'
+            '        end if\n'
+            '    end if\n'
+            'on error\n'
+            '    if theSub is not "" then\n'
+            '        if theSound is not "" then\n'
+            '            display notification theMsg with title theTitle subtitle theSub sound name theSound\n'
+            '        else\n'
+            '            display notification theMsg with title theTitle subtitle theSub\n'
+            '        end if\n'
+            '    else\n'
+            '        if theSound is not "" then\n'
+            '            display notification theMsg with title theTitle sound name theSound\n'
+            '        else\n'
+            '            display notification theMsg with title theTitle\n'
+            '        end if\n'
+            '    end if\n'
+            'end try'
+        )
             
         try:
-            res = subprocess.run(["osascript", "-e", script], capture_output=True)
+            res = subprocess.run(["osascript", "-e", script], env=env, capture_output=True, timeout=10)
             success = (res.returncode == 0)
             if not success:
                 logger.debug(f"AppleScript notification failed with return code {res.returncode}. Stderr: {res.stderr.decode('utf-8', errors='ignore')}")
+        except subprocess.TimeoutExpired as e:
+            logger.warning(f"AppleScript notification timed out: {e}")
+            success = False
         except Exception as e:
             logger.debug(f"AppleScript notification failed: {e}")
             success = False
@@ -272,7 +358,7 @@ def _send_notification_sync(
             # Check availability of notify-send
             has_notify_send = False
             try:
-                subprocess.run(["which", "notify-send"], capture_output=True, check=True)
+                subprocess.run(["which", "notify-send"], capture_output=True, check=True, timeout=5)
                 has_notify_send = True
             except Exception:
                 pass
@@ -319,17 +405,19 @@ def _send_notification_sync(
                 # Execute in sequence until one succeeds
                 for current_cmd in cmds_to_try:
                     try:
-                        res = subprocess.run(current_cmd, capture_output=True)
+                        res = subprocess.run(current_cmd, capture_output=True, timeout=10)
                         if res.returncode == 0:
                             success = True
                             break
+                    except subprocess.TimeoutExpired as e:
+                        logger.warning(f"Command {' '.join(current_cmd)} timed out: {e}")
                     except Exception as e:
                         logger.debug(f"Command {' '.join(current_cmd)} failed: {e}")
 
             # Try zenity fallback if notify-send failed or wasn't available
             if not success:
                 try:
-                    subprocess.run(["which", "zenity"], capture_output=True, check=True)
+                    subprocess.run(["which", "zenity"], capture_output=True, check=True, timeout=5)
                     
                     escaped_title = html.escape(title)
                     escaped_msg = html.escape(message)
@@ -342,8 +430,11 @@ def _send_notification_sync(
                     if icon_path:
                         cmd.append(f"--window-icon={icon_path}")
                     
-                    res = subprocess.run(cmd, capture_output=True)
+                    res = subprocess.run(cmd, capture_output=True, timeout=10)
                     success = (res.returncode == 0)
+                except subprocess.TimeoutExpired as e:
+                    logger.warning(f"zenity notification timed out: {e}")
+                    success = False
                 except Exception as e:
                     logger.debug(f"zenity command failed: {e}")
                     success = False
@@ -418,23 +509,41 @@ def notify(
         bool: True if synchronous invocation succeeded or background thread started, 
               False otherwise.
     """
-    if not title:
+    # Sanitize and truncate inputs
+    clean_title = _sanitize_string(title, 128)
+    clean_message = _sanitize_string(message, 1024)
+    clean_subtitle = _sanitize_string(subtitle, 128) if subtitle else None
+    clean_app_name = _sanitize_string(app_name, 64) if app_name else "yyds-notify"
+
+    if not clean_title:
         raise ValueError("Notification 'title' cannot be empty.")
-    if not message:
+    if not clean_message:
         raise ValueError("Notification 'message' cannot be empty.")
 
-    args = (title, message, subtitle, icon, urgency, timeout, sound, app_name, replace_id, fallback_to_print)
+    args = (
+        clean_title,
+        clean_message,
+        clean_subtitle,
+        icon,
+        urgency,
+        timeout,
+        sound,
+        clean_app_name,
+        replace_id,
+        fallback_to_print,
+    )
 
     if block:
         return _send_notification_sync(*args)
     else:
-        # Launch asynchronously in a daemon thread so it is completely non-blocking
-        thread = threading.Thread(
-            target=lambda: _send_notification_sync(*args),
-            daemon=True
-        )
-        thread.start()
-        return True
+        try:
+            future = _executor.submit(_send_notification_sync, *args)
+            _add_future(future)
+            return True
+        except RuntimeError:
+            # Executor is shut down (e.g. during application exit), fallback to sync
+            logger.warning("Notification executor is shut down. Falling back to synchronous delivery.")
+            return _send_notification_sync(*args)
 
 
 # Convenience aliases

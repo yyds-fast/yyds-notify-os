@@ -180,10 +180,17 @@ class TestNotifyOS(unittest.TestCase):
         self.assertEqual(called_args_first, ["which", "terminal-notifier"])
 
         called_args_second = mock_run.call_args_list[1][0][0]
+        called_kwargs_second = mock_run.call_args_list[1][1]
         self.assertEqual(called_args_second[0], "osascript")
         self.assertEqual(called_args_second[1], "-e")
-        expected_script = 'tell application "Finder" to display notification "World \\"Quotes\\"" with title "Hello" subtitle "Sub" sound name "Tink"'
-        self.assertEqual(called_args_second[2], expected_script)
+        self.assertIn("system attribute", called_args_second[2])
+        self.assertIn("display notification", called_args_second[2])
+        
+        env = called_kwargs_second["env"]
+        self.assertEqual(env["NOTIFY_TITLE"], "Hello")
+        self.assertEqual(env["NOTIFY_MESSAGE"], 'World "Quotes"')
+        self.assertEqual(env["NOTIFY_SUBTITLE"], "Sub")
+        self.assertEqual(env["NOTIFY_SOUND"], "Tink")
 
     @patch("platform.system")
     @patch("subprocess.run")
@@ -217,16 +224,18 @@ class TestNotifyOS(unittest.TestCase):
         self.assertEqual(env["NOTIFY_TAG"], "task_12")
         self.assertTrue(os.path.isabs(env["NOTIFY_ICON_PATH"]))
 
-    @patch("threading.Thread")
-    def test_async_non_blocking(self, mock_thread):
-        mock_thread_instance = MagicMock()
-        mock_thread.return_value = mock_thread_instance
+    @patch("yyds_notify_os.core._executor")
+    def test_async_non_blocking(self, mock_executor):
+        mock_future = MagicMock()
+        mock_executor.submit.return_value = mock_future
 
         res = notify("Title", "Message", block=False)
         self.assertTrue(res)
-        mock_thread.assert_called_once()
-        self.assertTrue(mock_thread.call_args[1]["daemon"])
-        mock_thread_instance.start.assert_called_once()
+        mock_executor.submit.assert_called_once()
+        called_args = mock_executor.submit.call_args[0]
+        self.assertEqual(called_args[0], _send_notification_sync)
+        self.assertEqual(called_args[1], "Title")
+        self.assertEqual(called_args[2], "Message")
 
     @patch("platform.system")
     @patch("subprocess.run")
@@ -269,6 +278,49 @@ class TestNotifyOS(unittest.TestCase):
         h = hashlib.md5(b"my_task_id").hexdigest()
         expected_id = int(h[:7], 16) + 1
         self.assertIn(str(expected_id), called_args)
+
+    def test_input_sanitization_and_truncation(self):
+        # Extremely long title and message
+        long_title = "A" * 200
+        long_message = "B" * 2000
+        long_subtitle = "C" * 200
+        long_app_name = "D" * 100
+
+        # We want to patch _send_notification_sync to inspect what clean inputs it gets
+        with patch("yyds_notify_os.core._send_notification_sync", return_value=True) as mock_send:
+            res = notify(
+                title=long_title,
+                message=long_message,
+                subtitle=long_subtitle,
+                app_name=long_app_name,
+                block=True
+            )
+            self.assertTrue(res)
+            mock_send.assert_called_once()
+            args = mock_send.call_args[0]
+            
+            # Verify truncation
+            self.assertEqual(len(args[0]), 128 + 3) # 128 chars + "..."
+            self.assertTrue(args[0].endswith("..."))
+            self.assertEqual(len(args[1]), 1024 + 3) # 1024 chars + "..."
+            self.assertTrue(args[1].endswith("..."))
+            self.assertEqual(len(args[2]), 128 + 3) # 128 chars + "..."
+            self.assertTrue(args[2].endswith("..."))
+            self.assertEqual(len(args[7]), 64 + 3) # 64 chars + "..."
+            self.assertTrue(args[7].endswith("..."))
+
+    @patch("yyds_notify_os.core._executor")
+    def test_notify_fallback_when_executor_shutdown(self, mock_executor):
+        # Simulate ThreadPoolExecutor raising RuntimeError (already shut down)
+        mock_executor.submit.side_effect = RuntimeError("Shutdown")
+        
+        with patch("yyds_notify_os.core._send_notification_sync", return_value=True) as mock_send:
+            res = notify("Title", "Message", block=False)
+            self.assertTrue(res)
+            # Should fallback to synchronous call
+            mock_send.assert_called_once_with(
+                "Title", "Message", None, None, "normal", 5, False, "yyds-notify", None, True
+            )
 
 
 if __name__ == "__main__":

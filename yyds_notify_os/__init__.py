@@ -1,6 +1,6 @@
 # -*- coding:utf-8 -*-
 
-from yyds_notify_os.core import notify, show, send
+from yyds_notify_os.core import notify, show, send, shutdown
 from yyds_notify_os.__version__ import (
     __title__,
     __description__,
@@ -15,6 +15,7 @@ __all__ = [
     "notify",
     "show",
     "send",
+    "shutdown",
     "__title__",
     "__description__",
     "__version__",

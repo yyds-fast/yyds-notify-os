@@ -1,22 +1,21 @@
 # yyds-notify-os
 
-A high-performance, lightweight, and easy-to-use cross-platform desktop notification library for Python.
+A lightweight and reliable cross-platform desktop notification library for Python.
 
-一个高性能、轻量级、零依赖的跨平台桌面系统通知库。
+一个轻量级、零 Python 运行时依赖的跨平台桌面系统通知库。
 
-[English README](README.md)
+[English README](https://github.com/yyds-fast/yyds-notify-os/blob/main/README.md)
 
 ---
 
 ## 💡 核心特性
 
-* **零外部依赖 (Zero Dependencies)**：只使用 Python 标准库，通过底层 `subprocess` 调用系统原生通知命令行工具。
-* **极速无感导入 (Fast Startup)**：代码经精细优化，导入时间低于 1ms，对运行性能几乎零影响。
-* **默认非阻塞 (Non-blocking by Default)**：默认在后台守护线程中触发通知，绝不阻塞主程序的 GUI 循环或核心业务流程。
-* **支持覆盖/替换机制 (`replace_id`)**：频繁发送时自动覆盖旧通知卡片（如进度条或动态监控），避免 Action Center 中卡片堆叠。
+* **零 Python 运行时依赖**：只使用 Python 标准库；系统通知由 PowerShell、AppleScript、`notify-send` 等平台工具完成，缺少可选工具时自动降级。
+* **有界异步调度**：默认使用最多 4 个后台工作线程和 64 个待处理槽位，避免高频调用导致内存无限增长。
+* **可靠的覆盖/替换机制 (`replace_id`)**：同一 ID 的更新严格串行执行，尚未开始的旧更新会合并为最新值，避免进度通知倒退与卡片堆叠。
 * **Windows 深度视觉打磨**：升级为微软现代的 `ToastGeneric` 模板，原生支持自定义图标 (`icon`) 和静音/映射系统预设声音 (`sound`)。
-* **路径智能补全**：自动将相对路径的图标转换为绝对路径，规避底层进程执行报错。
-* **优雅兜底 (Robust Fallback)**：当环境没有 GUI（如 SSH 终端、Headless CI 容器）或通知发送失败时，自动退化为控制台标准错误（sys.stderr）输出，并前置 ASCII 蜂鸣器控制符 (`\a`) 触发终端嘀声提示，确保程序永不崩溃的同时给出即时反馈。
+* **路径智能补全**：自动将已存在的本地图标相对路径转换为绝对路径，规避底层进程工作目录差异。
+* **可观测的失败与兜底**：无 GUI 或系统通知失败时写入 `sys.stderr` 并前置 ASCII 蜂鸣器；后台未预期异常会记录到 `yyds_notify_os` logger。
 * **包含命令行工具 (CLI Integrated)**：附带快捷可用的 `yyds-notify` / `yyds-notify-os` 命令，且默认显示应用名优化为 `"yyds-notify"`，方便脚本快速集成。
 
 ---
@@ -36,9 +35,9 @@ pip install -e .
 
 ## 📂 使用示例 (Examples)
 
-你可以在 [example/](file:///home/wzb/yyds_github/yyds-notify-os/example) 目录中找到可运行的使用示例：
-* [demo.py](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.py)：展示了 API 的核心用法，包括基础通知、自定义设置（声音、紧急度、自定义应用名等）以及使用 `replace_id` 实现进度条动态更新。
-* [demo.sh](file:///home/wzb/yyds_github/yyds-notify-os/example/demo.sh)：展示了如何通过命令行工具（CLI）调用各项参数发送及更新通知。
+你可以在 [example/](https://github.com/yyds-fast/yyds-notify-os/tree/main/example) 目录中找到可运行的使用示例：
+* [demo.py](https://github.com/yyds-fast/yyds-notify-os/blob/main/example/demo.py)：展示 Python API、自定义设置和 `replace_id` 动态更新。
+* [demo.sh](https://github.com/yyds-fast/yyds-notify-os/blob/main/example/demo.sh)：展示命令行参数及更新通知。
 
 ---
 
@@ -65,12 +64,14 @@ notify.send(
     message="下午 2:00 有一个技术评审会议",
     subtitle="工作会议",          # 支持 macOS / Linux-zenity
     icon="assets/bell.png",      # 自动解析为绝对路径 (Windows & Linux 支持)
-    sound="sms",                 # Windows 映射 SMS 短信音, macOS 播放默认声音
+    sound="sms",                 # Windows 映射短信音；macOS 将其作为声音名称
     urgency="normal",            # 紧急度: 'low', 'normal', 'critical' (Linux)
     timeout=5,                   # 显示时间 (秒, Linux)
-    app_name="自定义应用名"       # 最上方显示的自定义应用名称
+    app_name="自定义应用名"       # Windows / Linux 的应用名称
 )
 ```
+
+异步调用返回 `True` 只表示任务已成功入队；如需得到系统命令的实际执行结果，请使用 `block=True`。参数会在入队前验证，非法的 `urgency`、`timeout`、`sound` 或 `replace_id` 会抛出 `ValueError`。
 
 ### Windows 预设声音映射支持 (`sound` 参数值)
 * `"default"`: 默认提示音
@@ -78,14 +79,16 @@ notify.send(
 * `"mail"`: 邮件提示音
 * `"reminder"`: 提醒音效
 * `"sms"`: 短信提示音
-* `"alarm"`: 持续警报音（循环）
-* `"call"`: 持续来电音（循环）
+* `"alarm"`: 系统警报音
+* `"call"`: 系统来电音
 
 ### 接口别名
 你可以直接使用以下任意接口，它们是完全等价的：
 * `yyds_notify_os.notify(...)`
 * `yyds_notify_os.send(...)`
 * `yyds_notify_os.show(...)`
+
+长时间运行的应用通常无需手动管理线程池；需要提前停止接收异步任务时，可以调用 `yyds_notify_os.shutdown(wait=True, timeout=5)`。调用后，后续异步请求会同步降级执行。
 
 ---
 
@@ -107,6 +110,9 @@ yyds-notify "任务状态" "正在编译模块 B..." -r "compile_task"
 # 带副标题、紧急级别与声音的通知
 yyds-notify "系统错误" "内存占用超过 95%！" -s "服务器监控" -u critical --sound
 
+# 指定平台声音，并在独立后台进程中发送
+yyds-notify "构建完成" "产物已生成" --sound reminder --async
+
 # 查看全部可用参数
 yyds-notify --help
 ```
@@ -119,13 +125,13 @@ yyds-notify --help
    - 优先通过 PowerShell + Windows Runtime (WinRT) 组装现代的 `ToastGeneric` XML 架构发送通知，支持自定义 `appLogoOverride` 图标。
    - 所有文本、路径等数据均通过**进程局部环境变量**进行参数传递，彻底规避命令行特殊字符转义漏洞与乱码问题。
    - 为 `replace_id` 自动设置 `ToastNotification.Tag`，实现同标识卡片的替换更新。
-   - **首选创建自定义 AppName Notifier**；若在旧版 Windows 发生异常，自动在 catch 中**降级使用 100% 注册成功的 PowerShell 进程 ID** 进行通知推送，确保百分百送达。
+   - 首选创建自定义 AppName Notifier；若系统不接受该标识，则降级使用 PowerShell 的已知 AppID。
    - 针对不支持 WinRT 的 Windows 旧版本环境，最终捕获异常并降级使用经典的 `System.Windows.Forms.NotifyIcon` 右下角通知气泡。
 
 2. **macOS**：
-   - 自动检测并优先使用 `terminal-notifier` 工具（若系统已安装，推荐使用 `brew install terminal-notifier`），这提供了最优秀的原生通知体验。
+   - 自动检测并优先使用 `terminal-notifier` 工具（若系统已安装，推荐使用 `brew install terminal-notifier`），并用 `-group` 支持 `replace_id` 更新。
    - 若未安装，则自动回退到 AppleScript (`osascript`) 并**委托给 `Finder` 应用上下文运行** (`tell application "Finder" to display notification ...`)。这极大地规避了由于终端（Terminal / VS Code 等）本身没有通知权限而导致通知被系统静默拦截丢弃的问题。
-   - 内部已做好字符串转义逻辑，杜绝任意字符带来的命令注入风险。
+   - 文本通过进程环境变量或参数数组传递，避免拼接到 shell 命令中。
 
 3. **Linux**：
    - 优先检测 `DISPLAY` 与 `WAYLAND_DISPLAY` 环境变量。

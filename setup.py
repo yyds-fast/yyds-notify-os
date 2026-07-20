@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 # -*- coding:utf-8 -*-
 
-from setuptools import setup, find_packages
-from codecs import open
 import os
+from codecs import open
+
+from setuptools import find_packages, setup
 
 about = {}
 here = os.path.abspath(os.path.dirname(__file__))
@@ -25,10 +26,16 @@ setup(
     long_description=long_description,
     long_description_content_type="text/markdown",
     url=about["__url__"],
+    project_urls={
+        "Documentation": about["__url__"],
+        "Source": about["__url__"],
+        "Issues": f"{about['__url__']}/issues",
+    },
     license=about.get("__license__", "MIT"),
-    packages=find_packages(),
+    license_files=("LICENSE",),
+    packages=find_packages(exclude=("tests", "tests.*")),
     include_package_data=True,
-    python_requires='>=3.7',
+    python_requires=">=3.7",
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.7",
@@ -37,8 +44,8 @@ setup(
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Programming Language :: Python :: 3.13",
         "Operating System :: OS Independent",
-        "License :: OSI Approved :: MIT License",
     ],
     install_requires=[],
     entry_points={

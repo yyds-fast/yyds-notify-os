@@ -1,8 +1,15 @@
 #!/bin/bash
 
-# 清理旧的构建产物，防止重复上传引发 PyPI 400 报错
-rm -rf dist yyds_notify_os.egg-info
+set -euo pipefail
+
+# 清理并构建可复现的发布产物。
+rm -rf build dist yyds_notify_os.egg-info
 
 python -m build
+python -m twine check dist/*
 
-python -m twine upload dist/*
+if [[ "${1:-}" == "--publish" ]]; then
+    python -m twine upload dist/*
+else
+    echo "Build verified. Pass --publish to upload the artifacts."
+fi

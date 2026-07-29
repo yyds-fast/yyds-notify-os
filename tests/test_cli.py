@@ -128,6 +128,13 @@ class TestCLI(unittest.TestCase):
         with self.assertRaises(argparse.ArgumentTypeError):
             cli._positive_timeout("later")
 
+    def test_async_option_does_not_accept_abbreviation(self):
+        with patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit) as captured:
+                cli.main(["Title", "Message", "--asy"])
+
+        self.assertEqual(captured.exception.code, 2)
+
     @patch("yyds_notify_os.cli.notify", side_effect=ValueError("bad option"))
     def test_validation_error_is_reported(self, mock_notify):
         stderr = io.StringIO()

@@ -31,25 +31,31 @@ _keyed_jobs_lock = threading.Lock()
 _shutdown_lock = threading.Lock()
 _executor_shutdown = False
 
+# `notify-send` options vary across libnotify versions. Remember the last
+# command shape that succeeded so a steady stream of notifications does not
+# repeatedly probe options already known to be unsupported on this machine.
+_linux_notify_send_profile = None
+_linux_notify_send_profile_lock = threading.Lock()
+
 
 def _future_done(future):
     with _futures_lock:
         _active_futures.discard(future)
 
     try:
-        error = future.exception()
+        result = future.result()
     except CancelledError:
         return
-    except Exception:
-        logger.exception("Unable to inspect background notification result.")
-        return
-
-    if error is not None:
+    except Exception as error:
         logger.error(
             "Background notification failed: %s",
             error,
             exc_info=(type(error), error, error.__traceback__),
         )
+        return
+
+    if result is False:
+        logger.warning("Background notification could not be delivered.")
 
 
 def _add_future(future):
@@ -332,6 +338,45 @@ def _stable_replace_number(replace_id) -> int:
     return int(digest[:8], 16) or 1
 
 
+def _build_linux_notify_send_command(
+    title, message, icon_path, urgency, timeout, app_name, replace_id, profile
+):
+    """Builds one compatibility profile for a notify-send invocation."""
+    if profile == "minimal":
+        return ["notify-send", title, message]
+
+    cmd = [
+        "notify-send",
+        title,
+        message,
+        "-t",
+        str(timeout * 1000),
+        "-u",
+        urgency,
+    ]
+    if profile != "without_app" and app_name:
+        cmd.extend(["-a", app_name])
+    if icon_path:
+        cmd.extend(["-i", icon_path])
+    if profile == "full" and replace_id is not None:
+        try:
+            resolved_id = int(replace_id)
+        except (ValueError, TypeError):
+            resolved_id = _stable_replace_number(replace_id)
+        if not 0 <= resolved_id <= 0xFFFFFFFF:
+            resolved_id = _stable_replace_number(replace_id)
+        cmd.extend(["-r", str(resolved_id)])
+    return cmd
+
+
+def _linux_notify_send_profiles(replace_id):
+    profiles = ["full"]
+    if replace_id is not None:
+        profiles.append("without_replace")
+    profiles.extend(["without_app", "minimal"])
+    return profiles
+
+
 def _windows_replace_tag(replace_id) -> str:
     if replace_id is None:
         return ""
@@ -360,6 +405,8 @@ def _send_notification_sync(
     Synchronously triggers a system notification based on the current platform.
     Returns True if notification succeeded, False if it failed/fell back.
     """
+    global _linux_notify_send_profile
+
     system = platform.system()
 
     # Public calls are validated before reaching this function. Keep this
@@ -616,79 +663,41 @@ def _send_notification_sync(
             has_notify_send = shutil.which("notify-send") is not None
 
             if has_notify_send:
-                # Progressive fallbacks for notify-send command to maximize compatibility
-                cmds_to_try = []
+                profiles = _linux_notify_send_profiles(replace_id)
+                with _linux_notify_send_profile_lock:
+                    cached_profile = _linux_notify_send_profile
 
-                # 1. Full command (with replace_id, app_name, icon, timeout, urgency)
-                cmd_full = [
-                    "notify-send",
-                    title,
-                    message,
-                    "-t",
-                    str(timeout * 1000),
-                    "-u",
-                    urgency,
-                ]
-                if app_name:
-                    cmd_full.extend(["-a", app_name])
-                if icon_path:
-                    cmd_full.extend(["-i", icon_path])
-                if replace_id is not None:
-                    try:
-                        resolved_id = int(replace_id)
-                    except (ValueError, TypeError):
-                        resolved_id = _stable_replace_number(replace_id)
-                    if not 0 <= resolved_id <= 0xFFFFFFFF:
-                        resolved_id = _stable_replace_number(replace_id)
-                    cmd_full.extend(["-r", str(resolved_id)])
-                cmds_to_try.append(cmd_full)
+                # A cached profile has already succeeded on this host. If it
+                # later fails, invalidate it and use zenity as the fallback;
+                # probing every notify-send shape again can create duplicate
+                # popups for daemons that return a non-zero status late.
+                using_cached_profile = cached_profile in profiles
+                if using_cached_profile:
+                    profiles = [cached_profile]
 
-                # 2. Try without replace_id (-r option is not supported on older versions)
-                if replace_id is not None:
-                    cmd_no_r = [
-                        "notify-send",
+                for profile in profiles:
+                    current_cmd = _build_linux_notify_send_command(
                         title,
                         message,
-                        "-t",
-                        str(timeout * 1000),
-                        "-u",
+                        icon_path,
                         urgency,
-                    ]
-                    if app_name:
-                        cmd_no_r.extend(["-a", app_name])
-                    if icon_path:
-                        cmd_no_r.extend(["-i", icon_path])
-                    cmds_to_try.append(cmd_no_r)
-
-                # 3. Try without app_name (-a option might not be supported in some environments)
-                cmd_no_a = [
-                    "notify-send",
-                    title,
-                    message,
-                    "-t",
-                    str(timeout * 1000),
-                    "-u",
-                    urgency,
-                ]
-                if icon_path:
-                    cmd_no_a.extend(["-i", icon_path])
-                cmds_to_try.append(cmd_no_a)
-
-                # 4. Minimal command (just title and message)
-                cmd_minimal = ["notify-send", title, message]
-                cmds_to_try.append(cmd_minimal)
-
-                # Execute in sequence until one succeeds
-                for current_cmd in cmds_to_try:
+                        timeout,
+                        app_name,
+                        replace_id,
+                        profile,
+                    )
                     try:
                         res = subprocess.run(
                             current_cmd, capture_output=True, timeout=10
                         )
                         if res.returncode == 0:
                             success = True
+                            with _linux_notify_send_profile_lock:
+                                _linux_notify_send_profile = profile
                             break
                         logger.debug(
-                            "notify-send returned %d. Stderr: %s",
+                            "notify-send profile %s returned %d. Stderr: %s",
+                            profile,
                             res.returncode,
                             res.stderr.decode("utf-8", errors="ignore")
                             if res.stderr
@@ -703,6 +712,11 @@ def _send_notification_sync(
                         break
                     except Exception as e:
                         logger.debug(f"Command {' '.join(current_cmd)} failed: {e}")
+
+                if using_cached_profile and not success:
+                    with _linux_notify_send_profile_lock:
+                        if _linux_notify_send_profile == cached_profile:
+                            _linux_notify_send_profile = None
 
             # Try zenity fallback if notify-send failed or wasn't available
             if not success:

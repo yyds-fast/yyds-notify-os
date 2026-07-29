@@ -19,6 +19,10 @@ from yyds_notify_os.core import (
 
 
 class TestNotifyOS(unittest.TestCase):
+    def setUp(self):
+        with core_module._linux_notify_send_profile_lock:
+            core_module._linux_notify_send_profile = None
+
     @patch("os.path.exists")
     def test_resolve_icon_path(self, mock_exists):
         # 1. File exists locally
@@ -142,6 +146,59 @@ class TestNotifyOS(unittest.TestCase):
         called_args_fallback = mock_run.call_args_list[1][0][0]
         self.assertIn("-r", called_args_r)
         self.assertNotIn("-r", called_args_fallback)
+
+    @patch("platform.system", return_value="Linux")
+    @patch("shutil.which", return_value="/usr/bin/notify-send")
+    @patch("subprocess.run")
+    def test_linux_notify_send_caches_successful_fallback_profile(
+        self, mock_run, mock_which, mock_system
+    ):
+        mock_run.side_effect = [
+            MagicMock(returncode=1, stderr=b"unknown option: -r"),
+            MagicMock(returncode=0),
+            MagicMock(returncode=0),
+        ]
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}):
+            self.assertTrue(
+                _send_notification_sync(
+                    "Title", "first", replace_id="job", fallback_to_print=False
+                )
+            )
+            self.assertTrue(
+                _send_notification_sync(
+                    "Title", "second", replace_id="job", fallback_to_print=False
+                )
+            )
+
+        self.assertEqual(mock_run.call_count, 3)
+        first_command = mock_run.call_args_list[0][0][0]
+        cached_command = mock_run.call_args_list[2][0][0]
+        self.assertIn("-r", first_command)
+        self.assertNotIn("-r", cached_command)
+
+    @patch("platform.system", return_value="Linux")
+    @patch("shutil.which")
+    @patch("subprocess.run", return_value=MagicMock(returncode=1, stderr=b"failed"))
+    def test_linux_notify_send_invalidates_failed_cached_profile(
+        self, mock_run, mock_which, mock_system
+    ):
+        mock_which.side_effect = lambda name: (
+            "/usr/bin/notify-send" if name == "notify-send" else None
+        )
+        with core_module._linux_notify_send_profile_lock:
+            core_module._linux_notify_send_profile = "without_replace"
+
+        with patch.dict(os.environ, {"DISPLAY": ":0"}):
+            self.assertFalse(
+                _send_notification_sync(
+                    "Title", "Message", replace_id="job", fallback_to_print=False
+                )
+            )
+
+        mock_run.assert_called_once()
+        with core_module._linux_notify_send_profile_lock:
+            self.assertIsNone(core_module._linux_notify_send_profile)
 
     @patch("platform.system")
     @patch("shutil.which")
@@ -353,6 +410,27 @@ class TestNotifyOS(unittest.TestCase):
                         )
 
         self.assertTrue(any("background boom" in line for line in captured.output))
+
+    def test_async_false_result_is_logged(self):
+        with self.assertLogs("yyds_notify_os", level="WARNING") as captured:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                with patch("yyds_notify_os.core._executor", executor):
+                    with patch(
+                        "yyds_notify_os.core._send_notification_sync",
+                        return_value=False,
+                    ):
+                        self.assertTrue(
+                            notify(
+                                "Title",
+                                "Message",
+                                block=False,
+                                fallback_to_print=False,
+                            )
+                        )
+
+        self.assertTrue(
+            any("could not be delivered" in line for line in captured.output)
+        )
 
     @patch("yyds_notify_os.core._pending_slots")
     def test_async_queue_full_returns_false(self, mock_slots):

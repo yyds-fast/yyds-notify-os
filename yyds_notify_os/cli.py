@@ -41,6 +41,7 @@ def _build_parser():
     parser = argparse.ArgumentParser(
         description="A lightweight, cross-platform command line notification tool.",
         prog="yyds-notify",
+        allow_abbrev=False,
     )
     parser.add_argument("title", help="Title of the notification")
     parser.add_argument("message", help="Body/message content of the notification")

@@ -2,6 +2,53 @@
 requires = ["setuptools>=61.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "yyds-notify-os"
+dynamic = ["version"]
+description = "A lightweight and reliable cross-platform desktop notification library for Python."
+readme = "README.md"
+requires-python = ">=3.7"
+license = { text = "MIT" }
+authors = [
+    { name = "yyds-fast", email = "yyds.fast@gmail.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.7",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
+dependencies = []
+
+[project.urls]
+Documentation = "https://github.com/yyds-fast/yyds-notify-os"
+Source = "https://github.com/yyds-fast/yyds-notify-os"
+Issues = "https://github.com/yyds-fast/yyds-notify-os/issues"
+
+[project.scripts]
+yyds-notify = "yyds_notify_os.cli:main"
+yyds-notify-os = "yyds_notify_os.cli:main"
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "coverage[toml]",
+    "ruff",
+    "twine",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "yyds_notify_os.__version__.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["yyds_notify_os*"]
+exclude = ["tests", "tests.*"]
+
 [tool.ruff]
 target-version = "py37"
 line-length = 88

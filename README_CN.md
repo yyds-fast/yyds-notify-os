@@ -62,11 +62,11 @@ success = notify.send("服务器警告", "CPU 温度过高！", urgency="critica
 notify.send(
     title="日程提醒",
     message="下午 2:00 有一个技术评审会议",
-    subtitle="工作会议",          # 支持 macOS / Linux-zenity
-    icon="assets/bell.png",      # 自动解析为绝对路径 (Windows & Linux 支持)
-    sound="sms",                 # Windows 映射短信音；macOS 将其作为声音名称
-    urgency="normal",            # 紧急度: 'low', 'normal', 'critical' (Linux)
-    timeout=5,                   # 显示时间 (秒, Linux)
+    subtitle="工作会议",          # 支持 Windows / macOS / Linux-zenity
+    icon="assets/bell.png",      # 自动解析为绝对路径 (Windows / macOS / Linux 支持)
+    sound="sms",                 # 跨平台预设音效 (Windows / macOS 映射) 或 macOS 系统音名
+    urgency="normal",            # 紧急度: 'low', 'normal', 'critical' (Linux / Windows)
+    timeout=5,                   # 显示时间 (秒, Linux / Windows)
     app_name="自定义应用名"       # Windows / Linux 的应用名称
 )
 ```
@@ -112,6 +112,9 @@ yyds-notify "系统错误" "内存占用超过 95%！" -s "服务器监控" -u c
 
 # 指定平台声音，并在独立后台进程中发送
 yyds-notify "构建完成" "产物已生成" --sound reminder --async
+
+# 无图形环境时静默失败，禁用终端蜂鸣与 stderr 兜底文本
+yyds-notify "后台巡检" "状态正常" --no-fallback
 
 # 查看全部可用参数
 yyds-notify --help

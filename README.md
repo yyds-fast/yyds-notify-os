@@ -60,11 +60,11 @@ success = notify.send("Server Alert", "CPU temperature is too high!", urgency="c
 notify.send(
     title="Meeting Reminder",
     message="Technical review starts at 2:00 PM",
-    subtitle="Sprint Sync",       # Supported on macOS and Linux-zenity
-    icon="assets/bell.png",       # Automatically converted to absolute path (Windows/Linux)
-    sound="sms",                  # Windows SMS mapping; treated as a sound name on macOS
-    urgency="normal",             # Linux urgency levels: 'low', 'normal', 'critical'
-    timeout=5,                    # Display timeout in seconds (Linux)
+    subtitle="Sprint Sync",       # Supported on Windows, macOS, and Linux-zenity
+    icon="assets/bell.png",       # Automatically converted to absolute path
+    sound="sms",                  # Cross-platform preset (Windows/macOS) or macOS sound name
+    urgency="normal",             # Urgency levels: 'low', 'normal', 'critical' (Linux/Windows)
+    timeout=5,                    # Display timeout in seconds (Linux/Windows)
     app_name="yyds-notify"        # Custom application sender name (Windows/Linux)
 )
 ```
@@ -110,6 +110,9 @@ yyds-notify "Error" "Deployment failed!" -s "CI Pipeline" -u critical --sound
 
 # Select a platform sound and deliver from a detached process
 yyds-notify "Build Complete" "Artifacts are ready" --sound reminder --async
+
+# Suppress stderr/bell fallback when running headless
+yyds-notify "Silent Check" "Background probe" --no-fallback
 
 # View full help menu
 yyds-notify --help

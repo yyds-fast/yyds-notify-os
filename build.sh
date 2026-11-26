@@ -23,17 +23,28 @@ for option in "$@"; do
     esac
 done
 
+if [[ -n "${PYTHON:-}" ]]; then
+    python_bin="$PYTHON"
+elif command -v python3 &> /dev/null; then
+    python_bin="python3"
+elif command -v python &> /dev/null; then
+    python_bin="python"
+else
+    echo "Error: neither python3 nor python was found in PATH." >&2
+    exit 1
+fi
+
 if [[ "$clean" == true ]]; then
     rm -rf build dist yyds_notify_os.egg-info
 fi
 
-package_version="$(python -c 'from yyds_notify_os.__version__ import __version__; print(__version__)')"
+package_version="$("$python_bin" -c 'from yyds_notify_os.__version__ import __version__; print(__version__)')"
 artifacts=(
     "dist/yyds_notify_os-${package_version}-py3-none-any.whl"
     "dist/yyds_notify_os-${package_version}.tar.gz"
 )
 
-python -m build
+"$python_bin" -m build
 for artifact in "${artifacts[@]}"; do
     if [[ ! -f "$artifact" ]]; then
         echo "Expected build artifact was not created: $artifact" >&2
@@ -41,10 +52,10 @@ for artifact in "${artifacts[@]}"; do
     fi
 done
 
-python -m twine check "${artifacts[@]}"
+"$python_bin" -m twine check "${artifacts[@]}"
 
 if [[ "$upload" == true ]]; then
-    python -m twine upload "${artifacts[@]}"
+    "$python_bin" -m twine upload "${artifacts[@]}"
 else
     echo "Build verified. Pass --upload to upload the artifacts; use --clean to remove old build outputs first."
 fi

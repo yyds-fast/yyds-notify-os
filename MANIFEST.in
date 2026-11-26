@@ -2,4 +2,5 @@ include CHANGELOG.md
 include LICENSE
 include README.md
 include README_CN.md
+include yyds_notify_os/py.typed
 recursive-include example *.py *.sh

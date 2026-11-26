@@ -37,11 +37,11 @@ def demonstrate_custom_styling():
     success = notify.send(
         title="Important Meeting",
         message="Sprint planning starts in 10 minutes.",
-        subtitle="Sprint Sync",                # macOS & zenity support
-        icon=icon_name,                        # Linux icon name or file path
-        sound="reminder",                      # Play reminder sound (Windows sound mapping, default macOS)
-        urgency="critical",                    # Linux urgency levels: low, normal, critical
-        timeout=10,                            # Linux timeout in seconds
+        subtitle="Sprint Sync",                # Windows, macOS & Linux support
+        icon=icon_name,                        # System icon name or local image path
+        sound="reminder",                      # Cross-platform preset sound mapping
+        urgency="critical",                    # Urgency levels: low, normal, critical
+        timeout=10,                            # Display timeout in seconds
         app_name="DemoApp",                    # Custom sender/application name
         block=True                             # Wait until the notification subprocess finishes
     )

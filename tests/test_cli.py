@@ -1,9 +1,14 @@
+# -*- coding:utf-8 -*-
+
 import argparse
+import gc
 import io
 import logging
+import os
 import subprocess
 import unittest
-from unittest.mock import patch
+import warnings
+from unittest.mock import MagicMock, patch
 
 from yyds_notify_os import cli
 
@@ -50,6 +55,30 @@ class TestCLI(unittest.TestCase):
             fallback_to_print=True,
         )
 
+    @patch("yyds_notify_os.cli.notify", return_value=True)
+    def test_sound_flag_works_with_positional_and_single_dash_arguments(
+        self, mock_notify
+    ):
+        for argv, expected_title, expected_msg, expected_sound in [
+            (["--sound", "Title", "Message"], "Title", "Message", True),
+            (["Title", "--sound", "Message"], "Title", "Message", True),
+            (["--sound", "sms", "Title", "Message"], "Title", "Message", "sms"),
+            (["--sound", "Title", "--", "-Message"], "Title", "-Message", True),
+            (["--sound", "-", "Message"], "-", "Message", True),
+            (["--sound", "Title", "-"], "Title", "-", True),
+        ]:
+            mock_notify.reset_mock()
+            self.assertEqual(cli.main(argv), 0)
+            kwargs = mock_notify.call_args[1]
+            self.assertEqual(kwargs["title"], expected_title)
+            self.assertEqual(kwargs["message"], expected_msg)
+            self.assertEqual(kwargs["sound"], expected_sound)
+
+    @patch("yyds_notify_os.cli.notify", return_value=False)
+    def test_no_fallback_disables_terminal_fallback(self, mock_notify):
+        self.assertEqual(cli.main(["Title", "Message", "--no-fallback"]), 1)
+        self.assertFalse(mock_notify.call_args[1]["fallback_to_print"])
+
     @patch("yyds_notify_os.cli.notify", return_value=False)
     def test_main_returns_failure(self, mock_notify):
         self.assertEqual(cli.main(["Title", "Message"]), 1)
@@ -67,9 +96,27 @@ class TestCLI(unittest.TestCase):
         mock_spawn.assert_called_once_with(args)
         mock_notify.assert_not_called()
 
+    def test_real_async_spawn_emits_no_resource_warning(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", ResourceWarning)
+            rc = cli.main(["Title", "Message", "--no-fallback", "--async"])
+            gc.collect()
+        self.assertEqual(rc, 0)
+
+    @patch("yyds_notify_os.cli._spawn_detached")
+    def test_async_mode_rejects_invalid_inputs_before_spawning(self, mock_spawn):
+        stderr = io.StringIO()
+        with patch("sys.stderr", stderr):
+            result = cli.main(["   ", "Message", "--async"])
+
+        self.assertEqual(result, 1)
+        self.assertIn("cannot be empty", stderr.getvalue())
+        mock_spawn.assert_not_called()
+
+    @patch("yyds_notify_os.cli._should_detach_stderr", return_value=False)
     @patch("yyds_notify_os.cli.subprocess.Popen")
     @patch.object(cli.sys, "platform", "linux")
-    def test_spawn_detached_on_posix(self, mock_popen):
+    def test_spawn_detached_on_posix_terminal(self, mock_popen, mock_detach):
         cli._spawn_detached(["Title", "Message", "--async"])
 
         command = mock_popen.call_args[0][0]
@@ -79,6 +126,25 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(kwargs["stdin"], subprocess.DEVNULL)
         self.assertEqual(kwargs["stdout"], subprocess.DEVNULL)
         self.assertIsNone(kwargs["stderr"])
+
+    @patch("yyds_notify_os.cli.subprocess.Popen")
+    @patch.object(cli.sys, "platform", "linux")
+    def test_spawn_detached_detaches_stderr_on_pipe_or_no_fallback(self, mock_popen):
+        cli._spawn_detached(["Title", "Message", "--no-fallback", "--async"])
+        self.assertEqual(mock_popen.call_args[1]["stderr"], subprocess.DEVNULL)
+
+        read_fd, write_fd = os.pipe()
+        try:
+            fake_stderr = MagicMock()
+            fake_stderr.fileno.return_value = write_fd
+            with patch("sys.stderr", fake_stderr):
+                self.assertTrue(cli._should_detach_stderr(no_fallback=False))
+        finally:
+            os.close(read_fd)
+            os.close(write_fd)
+
+        with patch("sys.stderr", io.StringIO()):
+            self.assertFalse(cli._should_detach_stderr(no_fallback=False))
 
     @patch("yyds_notify_os.cli.subprocess.Popen")
     @patch.object(cli.sys, "platform", "linux")
@@ -106,8 +172,9 @@ class TestCLI(unittest.TestCase):
         self.assertEqual(result, 1)
         self.assertIn("spawn failed", stderr.getvalue())
 
-    def test_cli_logging_replaces_library_null_handler(self):
+    def test_cli_logging_replaces_null_handler_and_tracks_dynamic_stderr(self):
         self.logger.handlers = [logging.NullHandler()]
+        self.logger.setLevel(logging.NOTSET)
         configured = cli._configure_logging()
 
         self.assertTrue(configured.handlers)
@@ -115,7 +182,15 @@ class TestCLI(unittest.TestCase):
             any(isinstance(h, logging.NullHandler) for h in configured.handlers)
         )
         self.assertEqual(configured.level, logging.WARNING)
-        self.assertFalse(configured.propagate)
+
+        first_err = io.StringIO()
+        second_err = io.StringIO()
+        with patch("sys.stderr", first_err):
+            configured.warning("first message")
+        with patch("sys.stderr", second_err):
+            configured.warning("second message")
+        self.assertIn("first message", first_err.getvalue())
+        self.assertIn("second message", second_err.getvalue())
 
     def test_timeout_must_be_positive(self):
         with patch("sys.stderr", io.StringIO()):

@@ -343,7 +343,14 @@ def _run_command(
         try:
             _, stderr_bytes = proc.communicate(timeout=0.5)
         except subprocess.TimeoutExpired:
-            if proc.stderr is not None:
+            # On Windows, `communicate` spawns a daemon `stderr_thread` blocked
+            # in `BufferedReader.read()`; calling `proc.stderr.close()` from
+            # this thread would block on `BufferedReader`'s mutex until any
+            # grandchild holding the pipe exits.
+            stderr_thread = getattr(proc, "stderr_thread", None)
+            if proc.stderr is not None and not (
+                stderr_thread is not None and stderr_thread.is_alive()
+            ):
                 proc.stderr.close()
             try:
                 proc.wait(timeout=0.2)
@@ -353,9 +360,15 @@ def _run_command(
         raise subprocess.TimeoutExpired(cmd, timeout, stderr=stderr_bytes)
     except Exception:
         proc.kill()
-        if proc.stderr is not None:
+        stderr_thread = getattr(proc, "stderr_thread", None)
+        if proc.stderr is not None and not (
+            stderr_thread is not None and stderr_thread.is_alive()
+        ):
             proc.stderr.close()
-        proc.wait()
+        try:
+            proc.wait(timeout=0.5)
+        except subprocess.TimeoutExpired:
+            pass
         raise
 
     return subprocess.CompletedProcess(cmd, proc.returncode, b"", stderr_bytes or b"")
@@ -475,7 +488,8 @@ class _NotificationDispatcher:
                         self._idle_workers -= 1
                     if not notified and not self._queue:
                         self._workers -= 1
-                        self._cond.notify_all()
+                        if self._workers == 0:
+                            self._cond.notify_all()
                         return
                 if not self._queue and self._closed:
                     self._workers -= 1

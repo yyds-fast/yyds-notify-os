@@ -52,16 +52,24 @@ class TestNotifyOS(unittest.TestCase):
     def test_resolve_icon_path_files_dirs_tilde_and_themes(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             icon_file = os.path.join(tmpdir, "bell.png")
+            subdir = os.path.join(tmpdir, "nested_dir")
+            os.mkdir(subdir)
             with open(icon_file, "wb") as handle:
                 handle.write(b"png")
 
-            # Existing local file resolves to absolute path
-            rel_name = os.path.relpath(icon_file)
-            self.assertEqual(_resolve_icon_path(rel_name), os.path.abspath(icon_file))
+            # Test relative file and directory resolution on the same drive/mount
+            saved_cwd = os.getcwd()
+            try:
+                os.chdir(tmpdir)
+                self.assertEqual(
+                    _resolve_icon_path("bell.png"), os.path.abspath(icon_file)
+                )
+                self.assertIsNone(_resolve_icon_path("nested_dir"))
+            finally:
+                os.chdir(saved_cwd)
 
-            # Directories are rejected (not valid image files)
+            # Absolute directory path is also rejected
             self.assertIsNone(_resolve_icon_path(tmpdir))
-            self.assertIsNone(_resolve_icon_path(os.path.relpath(tmpdir)))
 
             # Tilde user-home expansion
             with patch.dict(os.environ, {"HOME": tmpdir, "USERPROFILE": tmpdir}):
@@ -106,11 +114,11 @@ class TestNotifyOS(unittest.TestCase):
                     self.assertEqual(len(calls), 2)
 
     def test_run_command_grandchild_pipe_does_not_hang_after_timeout(self):
-        # Child spawns a grandchild holding stderr open for 5s, while timeout=0.1s
+        # Child spawns a grandchild holding stderr open for 3.5s, while timeout=0.1s
         script = (
             "import subprocess, sys, time; "
-            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(5)']); "
-            "time.sleep(5)"
+            "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(3.5)']); "
+            "time.sleep(3.5)"
         )
         t0 = time.monotonic()
         with self.assertRaises(subprocess.TimeoutExpired):
@@ -121,6 +129,19 @@ class TestNotifyOS(unittest.TestCase):
             )
         elapsed = time.monotonic() - t0
         self.assertLess(elapsed, 2.0)
+
+        # Simulate Windows `Popen.stderr_thread` still blocked in BufferedReader.read():
+        # `_run_command` must NOT call blocking `proc.stderr.close()`!
+        fake_proc = MagicMock()
+        fake_proc.communicate.side_effect = [
+            subprocess.TimeoutExpired(["cmd"], 0.1),
+            subprocess.TimeoutExpired(["cmd"], 0.5),
+        ]
+        fake_proc.stderr_thread.is_alive.return_value = True
+        with patch("subprocess.Popen", return_value=fake_proc):
+            with self.assertRaises(subprocess.TimeoutExpired):
+                _run_command(["cmd"], timeout=0.1, capture_stderr=True)
+        fake_proc.stderr.close.assert_not_called()
 
     def test_notify_invalid_inputs(self):
         with self.assertRaises(ValueError):
@@ -583,34 +604,43 @@ class TestNotifyOS(unittest.TestCase):
             False,
         )
         barrier_event = threading.Event()
+        all_done = threading.Event()
+        count_lock = threading.Lock()
+        completed = [0]
 
         def work_item(*args):
-            barrier_event.wait(timeout=1.0)
+            barrier_event.wait(timeout=2.0)
+            with count_lock:
+                completed[0] += 1
+                if completed[0] >= 8:
+                    all_done.set()
             return True
 
         try:
             with patch(
                 "yyds_notify_os.core._send_notification_sync", return_value=True
             ):
-                # Warm up 1 worker and wait slightly so it enters idle wait()
                 self.assertTrue(dispatcher.submit(base_args))
-                time.sleep(0.02)
+                idle_deadline = time.monotonic() + 1.0
+                while dispatcher._idle_workers < 1 and time.monotonic() < idle_deadline:
+                    time.sleep(0.01)
                 self.assertEqual(dispatcher._workers, 1)
 
+            # Keep `_send_notification_sync` patched until all 8 items finish
+            # so background workers never invoke real OS notification commands!
             with patch(
                 "yyds_notify_os.core._send_notification_sync", side_effect=work_item
             ):
-                # Tight burst of 8 items must scale up to all 4 workers!
                 for _ in range(8):
                     self.assertTrue(dispatcher.submit(base_args))
                 self.assertEqual(dispatcher._workers, 4)
                 barrier_event.set()
+                self.assertTrue(all_done.wait(timeout=2.0))
 
-            # Wait for idle_timeout (0.08s) -> all 4 workers retire back to 0!
-            deadline = time.monotonic() + 1.0
-            while dispatcher._workers > 0 and time.monotonic() < deadline:
-                time.sleep(0.02)
-            self.assertEqual(dispatcher._workers, 0)
+                deadline = time.monotonic() + 2.0
+                while dispatcher._workers > 0 and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertEqual(dispatcher._workers, 0)
         finally:
             barrier_event.set()
             dispatcher.shutdown(wait=True, timeout=1.0)

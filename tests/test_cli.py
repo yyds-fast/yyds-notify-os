@@ -99,9 +99,10 @@ class TestCLI(unittest.TestCase):
     def test_real_async_spawn_emits_no_resource_warning(self):
         with warnings.catch_warnings():
             warnings.simplefilter("error", ResourceWarning)
-            rc = cli.main(["Title", "Message", "--no-fallback", "--async"])
+            proc = cli._spawn_detached(["--version", "--no-fallback", "--async"])
+            self.assertIsNotNone(proc.pid)
+            del proc
             gc.collect()
-        self.assertEqual(rc, 0)
 
     @patch("yyds_notify_os.cli._spawn_detached")
     def test_async_mode_rejects_invalid_inputs_before_spawning(self, mock_spawn):

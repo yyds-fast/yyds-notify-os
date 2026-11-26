@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+- Avoid blocking on Windows `Popen.stderr_thread` `BufferedReader` locks when cleaning up timed-out subprocesses whose grandchildren inherited `stderr`.
+- Notify waiters only when the final idle worker thread exits so idle timers on sibling workers are not reset.
+- Pin Python 3.8 and 3.9 CI jobs to `ubuntu-24.04` and make cross-platform unit tests drive-independent and popup-free on Windows/macOS runners.
+
 ## 0.4.0
 
 - Fix Windows `ToastGeneric` notifications by loading WinRT `XmlDocument`/`ToastNotification` projections, constructing adaptive `ToastGeneric` XML directly, caching and syncing per-app `HKCU` `AppUserModelId` display names/icons (cleaning up stale `IconUri`), supporting `subtitle` and looping audio, and pre-encoding the PowerShell script.
